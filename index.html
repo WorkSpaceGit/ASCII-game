@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>ASCII-гра</title>
+<link rel="icon" href="data:image/svg+xml,
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
+  <text x='50%' y='55%' font-size='40' text-anchor='middle' fill='white' font-family='monospace'>=[-]=</text>
+</svg>">
+<style>
+body {
+  margin:0; height:100vh; background:black;
+  font-family:monospace; white-space:pre; overflow:hidden;
+}
+.car { position:absolute; font-weight:bold; }
+.lane, .divider { position:absolute; width:100%; }
+.lane { border-top:1px solid gray; opacity:0.3; }
+.divider { border-top:4px double yellow; opacity:0.8; }
+#player {
+  position:absolute; font-weight:bold; font-size:24px;
+  left:50%; transform:translateX(-50%);
+}
+#score {
+  position:absolute; top:230px; left:50%;
+  transform:translateX(-50%); color:white; font-size:20px;
+}
+#gameover {
+  position:absolute; top:50%; left:50%;
+  transform:translate(-50%,-50%); color:red; font-size:28px;
+  display:none; flex-direction:column; align-items:center; text-align:center;
+}
+#gameover #gameover-text { margin-bottom:20px; white-space:pre-line; }
+button {
+  font-size:20px; padding:10px 20px; margin:5px;
+  background:#222; color:white; border:1px solid gray; border-radius:8px;
+}
+#controls {
+  position:absolute; bottom:50px; left:50%;
+  transform:translateX(-50%);
+}
+</style>
+</head>
+<body>
+
+<div id="gameover">
+  <div id="gameover-text"></div>
+  <button onclick="restartGame()">Почати спочатку</button>
+</div>
+
+<div id="controls">
+  <button onclick="movePlayer(-1)">⬆</button>
+  <button onclick="movePlayer(1)">⬇</button>
+</div>
+
+<div id="score">00:00:0</div>
+<div id="player">:=[:]=:</div>
+
+<script>
+const carSprites = ['=(o)≡','≡[+]≡','(o)=(o)=[:]','=[:]=','<[•)>','=[-]=','[]=o=[]','<(o)>'];
+const carColors  = ['red','orange','yellow','lime','cyan','blue','magenta','white'];
+const laneCount = 3;
+const laneHeight = 30;
+const safeDistance = 7;
+let laneTops = [];
+let maxCells = Math.floor(window.innerWidth / 10);
+let speedMultiplier = 1;
+let gameOver = false;
+let fastCarsSpawned = 0;
+let startTime;
+let cars = [], fastCars = [];
+
+const player = document.getElementById('player');
+let playerLane = laneCount;
+
+// Ініціалізація доріжок
+function initLanes() {
+  laneTops = Array.from({length: laneCount*2}, (_,i)=>i*laneHeight + (i>=laneCount?laneHeight/2:0));
+  laneTops.forEach(t=>addElement('lane', t));
+  [laneCount*laneHeight, laneCount*laneHeight + laneHeight/2].forEach(t=>addElement('divider', t));
+  addElement('lane', laneTops.at(-1)+laneHeight);
+}
+function addElement(cls, top){
+  const el = document.createElement('div');
+  el.className = cls;
+  el.style.top = top+'px';
+  document.body.appendChild(el);
+  return el;
+}
+
+// Рух гравця
+function updatePlayerPos(){ player.style.top = (laneTops[playerLane]+5)+'px'; }
+updatePlayerPos();
+function movePlayer(dir){
+  playerLane = Math.max(0, Math.min(laneTops.length-1, playerLane+dir));
+  updatePlayerPos();
+}
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowUp') movePlayer(-1);
+  if(e.key==='ArrowDown') movePlayer(1);
+});
+
+// Маячки гравця
+function animatePlayerLights(){
+  player.innerHTML = player.innerText.split('').map(ch=>{
+    if(ch===':') return `<span style="color:${Math.random()>0.5?'red':'blue'}">:</span>`;
+    if(ch==='=') return `<span style="color:${Math.random()>0.5?'blue':'white'}">=</span>`;
+    return ch;
+  }).join('');
+}
+
+// Ініціалізація авто
+function initCars(){
+  carSprites.forEach((sprite,i)=>{
+    const lane = i % (laneCount*2);
+    const el = document.createElement('div');
+    el.className='car';
+    el.innerText = sprite;
+    el.style.color = carColors[i % carColors.length];
+    el.style.top = laneTops[lane] + (lane===laneCount?12:5)+'px';
+    document.body.appendChild(el);
+    cars.push({
+      element: el,
+      x: Math.random()*maxCells,
+      speed: (0.5 + Math.random()*2)/16,
+      direction: lane < laneCount ? -1 : 1, // верхні ←, нижні →
+      lane, counted:false, fast:false
+    });
+  });
+}
+
+// Створення fastCars
+function spawnFastCar(){
+  if(gameOver) return;
+  fastCarsSpawned++;
+  const lane = Math.floor(Math.random()*laneTops.length);
+  const el = document.createElement('div');
+  el.className='car';
+  el.innerText='(o)=(o)';
+  el.style.top=laneTops[lane]+5+'px';
+  document.body.appendChild(el);
+  const fastCar = {
+    element: el,
+    x: lane<laneCount?maxCells+5:-5, // верхні стартують справа, нижні зліва
+    speed: ((0.5 + Math.random()*2)/16)*15,
+    direction: lane<laneCount?-1:1,
+    lane, counted:false, fast:true, colorInterval:null
+  };
+  fastCar.colorInterval = setInterval(()=>{
+    if(gameOver){ clearInterval(fastCar.colorInterval); return; }
+    el.style.color = ['red','yellow','lime','cyan','magenta','white'][Math.floor(Math.random()*6)];
+  },200);
+  fastCars.push(fastCar);
+}
+
+// Колізії
+function checkCollision(car){
+  const carLeft = car.x*10,
+        carRight = carLeft + car.element.innerText.length*10,
+        playerLeft = parseFloat(player.offsetLeft),
+        playerRight = playerLeft + player.offsetWidth;
+  if(car.lane===playerLane && !(carRight<playerLeft || carLeft>playerRight)) endGame();
+}
+
+// Швидкість авто
+function adjustSpeed(car){
+  const slowed = cars.some(other=>other!==car && other.lane===car.lane &&
+    ((car.direction>0 && other.x>car.x && other.x-car.x<safeDistance) ||
+     (car.direction<0 && car.x>other.x && car.x-other.x<safeDistance))
+  );
+  car.currentSpeed = slowed ? car.speed*0.3 : car.speed;
+}
+
+// Кінець гри
+function endGame(){
+  gameOver=true;
+  clearInterval(playerLightsInterval);
+  fastCars.forEach(c=>{ if(c.colorInterval) clearInterval(c.colorInterval); });
+  document.getElementById('gameover-text').innerText=
+    `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nуникнутих зіткнень: ${fastCarsSpawned}`;
+  document.getElementById('gameover').style.display='flex';
+}
+
+// Рестарт
+function restartGame(){
+  [...cars, ...fastCars].forEach(c=>c.element.remove());
+  cars=[]; fastCars=[];
+  fastCarsSpawned=0;
+  gameOver=false;
+  document.getElementById('gameover').style.display='none';
+  startTime=Date.now();
+  initCars();
+  requestAnimationFrame(mainLoop);
+  playerLightsInterval = setInterval(animatePlayerLights,300);
+}
+
+// Таймер
+function updateScore(){
+  const elapsed = Date.now()-startTime;
+  const min = Math.floor(elapsed/60000).toString().padStart(2,'0');
+  const sec = Math.floor((elapsed%60000)/1000).toString().padStart(2,'0');
+  const tenths = Math.floor((elapsed%1000)/100);
+  document.getElementById('score').innerText=`${min}:${sec}:${tenths}`;
+}
+
+// Основна анімація авто
+function updateCar(car){
+  if(car.fast) car.x += car.speed*car.direction*speedMultiplier;
+  else { adjustSpeed(car); car.x += (car.currentSpeed||car.speed)*car.direction*speedMultiplier; }
+
+  const offscreen = car.direction>0? car.x>maxCells : car.x<-car.element.innerText.length;
+  if(offscreen){
+    if(car.fast){
+      if(car.colorInterval) clearInterval(car.colorInterval);
+      car.element.remove();
+      return false;
+    } else {
+      car.x = car.direction>0?-car.element.innerText.length:maxCells;
+      car.counted=true;
+    }
+  }
+  car.element.style.left = (car.x*10)+'px';
+  checkCollision(car);
+  return true;
+}
+
+// Головний цикл
+function mainLoop(){
+  if(gameOver) return;
+  updateScore();
+  cars.forEach(updateCar);
+  for(let i=fastCars.length-1;i>=0;i--) if(!updateCar(fastCars[i])) fastCars.splice(i,1);
+  requestAnimationFrame(mainLoop);
+}
+
+// Запуск гри
+initLanes();
+initCars();
+startTime = Date.now();
+let playerLightsInterval = setInterval(animatePlayerLights,300);
+setInterval(spawnFastCar, 3000 + Math.random()*4000);
+requestAnimationFrame(mainLoop);
+
+// Адаптивність при resize
+window.addEventListener('resize',()=>{ maxCells=Math.floor(window.innerWidth/10); });
+</script>
+</body>
+</html>
