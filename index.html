@@ -3,10 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>ASCII-гра</title>
-<link rel="icon" href="data:image/svg+xml,
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
-  <text x='50%' y='55%' font-size='40' text-anchor='middle' fill='white' font-family='monospace'>=[-]=</text>
-</svg>">
 <style>
 body {
   margin:0; height:100vh; background:black;
@@ -23,6 +19,11 @@ body {
 #score {
   position:absolute; top:230px; left:50%;
   transform:translateX(-50%); color:white; font-size:20px;
+}
+#hud {
+  position:absolute; top:260px; left:50%;
+  transform:translateX(-50%); color:lime; font-size:18px;
+  transition: color 0.3s;
 }
 #gameover {
   position:absolute; top:50%; left:50%;
@@ -53,6 +54,7 @@ button {
 </div>
 
 <div id="score">00:00:0</div>
+<div id="hud"></div>
 <div id="player">:=[:]=:</div>
 
 <script>
@@ -69,8 +71,23 @@ let fastCarsSpawned = 0;
 let startTime;
 let cars = [], fastCars = [];
 
+let carsPassed = 0;
+let kmh = 20;
+let gear = 1;
+const gearNames = ["ПЕРША","ДРУГА","ТРЕТЯ","ЧЕТВЕРТА","П’ЯТА"];
+
 const player = document.getElementById('player');
 let playerLane = laneCount;
+
+// HUD
+function updateHud(highlight=false){
+  const hud = document.getElementById('hud');
+  hud.innerText = `Швидкість: ${kmh} км/год || Передача: ${gearNames[gear-1]} || Уникнутих: ${carsPassed}`;
+  hud.style.color = highlight ? "yellow" : "lime";
+  if(highlight){
+    setTimeout(()=>{ if(!gameOver) hud.style.color="lime"; },1000);
+  }
+}
 
 // Ініціалізація доріжок
 function initLanes() {
@@ -122,8 +139,8 @@ function initCars(){
       element: el,
       x: Math.random()*maxCells,
       speed: (0.5 + Math.random()*2)/16,
-      direction: lane < laneCount ? -1 : 1, // верхні ←, нижні →
-      lane, counted:false, fast:false
+      direction: lane < laneCount ? -1 : 1,
+      lane, fast:false
     });
   });
 }
@@ -140,10 +157,10 @@ function spawnFastCar(){
   document.body.appendChild(el);
   const fastCar = {
     element: el,
-    x: lane<laneCount?maxCells+5:-5, // верхні стартують справа, нижні зліва
+    x: lane<laneCount?maxCells+5:-5,
     speed: ((0.5 + Math.random()*2)/16)*15,
     direction: lane<laneCount?-1:1,
-    lane, counted:false, fast:true, colorInterval:null
+    lane, fast:true, colorInterval:null
   };
   fastCar.colorInterval = setInterval(()=>{
     if(gameOver){ clearInterval(fastCar.colorInterval); return; }
@@ -176,7 +193,7 @@ function endGame(){
   clearInterval(playerLightsInterval);
   fastCars.forEach(c=>{ if(c.colorInterval) clearInterval(c.colorInterval); });
   document.getElementById('gameover-text').innerText=
-    `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nуникнутих зіткнень: ${fastCarsSpawned}`;
+    `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nУникнутих зіткнень: ${carsPassed}`;
   document.getElementById('gameover').style.display='flex';
 }
 
@@ -184,13 +201,14 @@ function endGame(){
 function restartGame(){
   [...cars, ...fastCars].forEach(c=>c.element.remove());
   cars=[]; fastCars=[];
-  fastCarsSpawned=0;
+  fastCarsSpawned=0; carsPassed=0; kmh=20; gear=1; speedMultiplier=1;
   gameOver=false;
   document.getElementById('gameover').style.display='none';
   startTime=Date.now();
   initCars();
   requestAnimationFrame(mainLoop);
   playerLightsInterval = setInterval(animatePlayerLights,300);
+  updateHud();
 }
 
 // Таймер
@@ -215,7 +233,23 @@ function updateCar(car){
       return false;
     } else {
       car.x = car.direction>0?-car.element.innerText.length:maxCells;
-      car.counted=true;
+
+      // ✅ Рахуємо кожен проїзд
+      carsPassed++;
+
+      // Кожні 5 авто → +5 км/год
+      if(carsPassed % 5 === 0){ 
+        kmh += 5; 
+        updateHud(); 
+      }
+
+      // Кожні 10 авто → передача + ускладнення
+      if(carsPassed % 10 === 0 && gear < 5){
+        speedMultiplier = Math.min(speedMultiplier+0.5,5);
+        gear++;
+        kmh += 5;
+        updateHud(true); // highlight
+      }
     }
   }
   car.element.style.left = (car.x*10)+'px';
@@ -239,6 +273,7 @@ startTime = Date.now();
 let playerLightsInterval = setInterval(animatePlayerLights,300);
 setInterval(spawnFastCar, 3000 + Math.random()*4000);
 requestAnimationFrame(mainLoop);
+updateHud();
 
 // Адаптивність при resize
 window.addEventListener('resize',()=>{ maxCells=Math.floor(window.innerWidth/10); });
