@@ -74,6 +74,8 @@ let cars = [], fastCars = [];
 let carsPassed = 0;
 let kmh = 20;
 let gear = 1;
+let shields = 0;
+let lastSide = null;
 const gearNames = ["ПЕРША","ДРУГА","ТРЕТЯ","ЧЕТВЕРТА","П’ЯТА"];
 
 const player = document.getElementById('player');
@@ -82,7 +84,7 @@ let playerLane = laneCount;
 // HUD
 function updateHud(highlight=false){
   const hud = document.getElementById('hud');
-  hud.innerText = `Швидкість: ${kmh} км/год || Передача: ${gearNames[gear-1]} || Уникнутих: ${carsPassed}`;
+  hud.innerText = `Швидкість: ${kmh} км/год || Передача: ${gearNames[gear-1]} || Уникнутих авто: ${carsPassed} || Щити: ${shields}`;
   hud.style.color = highlight ? "yellow" : "lime";
   if(highlight){
     setTimeout(()=>{ if(!gameOver) hud.style.color="lime"; },1000);
@@ -108,8 +110,23 @@ function addElement(cls, top){
 function updatePlayerPos(){ player.style.top = (laneTops[playerLane]+5)+'px'; }
 updatePlayerPos();
 function movePlayer(dir){
+  const prevLane = playerLane;
   playerLane = Math.max(0, Math.min(laneTops.length-1, playerLane+dir));
   updatePlayerPos();
+
+  // ✅ Логіка для щита
+  if(playerLane === 0) lastSide = 0;
+  if(playerLane === laneTops.length-1 && lastSide === 0){
+    shields++;
+    lastSide = null;
+    updateHud(true);
+  }
+  if(playerLane === laneTops.length-1) lastSide = 1;
+  if(playerLane === 0 && lastSide === 1){
+    shields++;
+    lastSide = null;
+    updateHud(true);
+  }
 }
 document.addEventListener('keydown', e=>{
   if(e.key==='ArrowUp') movePlayer(-1);
@@ -140,7 +157,7 @@ function initCars(){
       x: Math.random()*maxCells,
       speed: (0.5 + Math.random()*2)/16,
       direction: lane < laneCount ? -1 : 1,
-      lane, fast:false
+      lane, fast:false, removed:false
     });
   });
 }
@@ -160,7 +177,7 @@ function spawnFastCar(){
     x: lane<laneCount?maxCells+5:-5,
     speed: ((0.5 + Math.random()*2)/16)*15,
     direction: lane<laneCount?-1:1,
-    lane, fast:true, colorInterval:null
+    lane, fast:true, colorInterval:null, removed:false
   };
   fastCar.colorInterval = setInterval(()=>{
     if(gameOver){ clearInterval(fastCar.colorInterval); return; }
@@ -171,11 +188,26 @@ function spawnFastCar(){
 
 // Колізії
 function checkCollision(car){
+  // Якщо машина вже помічена як видалена — нічого не робимо
+  if(car.removed) return;
+
   const carLeft = car.x*10,
-        carRight = carLeft + car.element.innerText.length*10,
+        carRight = carLeft + (car.element && car.element.innerText ? car.element.innerText.length*10 : 0),
         playerLeft = parseFloat(player.offsetLeft),
         playerRight = playerLeft + player.offsetWidth;
-  if(car.lane===playerLane && !(carRight<playerLeft || carLeft>playerRight)) endGame();
+  if(car.lane===playerLane && !(carRight<playerLeft || carLeft>playerRight)){
+    if(shields > 0){
+      // використали щит — не завершуємо гру
+      shields--;
+      updateHud(true);
+      if(car.colorInterval) { clearInterval(car.colorInterval); car.colorInterval = null; }
+      if(car.element) car.element.remove();
+      car.removed = true;
+      return;
+    } else {
+      endGame();
+    }
+  }
 }
 
 // Швидкість авто
@@ -193,15 +225,18 @@ function endGame(){
   clearInterval(playerLightsInterval);
   fastCars.forEach(c=>{ if(c.colorInterval) clearInterval(c.colorInterval); });
   document.getElementById('gameover-text').innerText=
-    `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nУникнутих зіткнень: ${carsPassed}`;
+    `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nуникнутих зіткнень: ${carsPassed}`;
   document.getElementById('gameover').style.display='flex';
 }
 
 // Рестарт
 function restartGame(){
-  [...cars, ...fastCars].forEach(c=>c.element.remove());
+  [...cars, ...fastCars].forEach(c=>{
+    try { if(c.colorInterval) clearInterval(c.colorInterval); } catch(e){}
+    try { if(c.element) c.element.remove(); } catch(e){}
+  });
   cars=[]; fastCars=[];
-  fastCarsSpawned=0; carsPassed=0; kmh=20; gear=1; speedMultiplier=1;
+  fastCarsSpawned=0; carsPassed=0; kmh=20; gear=1; speedMultiplier=1; shields=0; lastSide=null;
   gameOver=false;
   document.getElementById('gameover').style.display='none';
   startTime=Date.now();
@@ -222,6 +257,13 @@ function updateScore(){
 
 // Основна анімація авто
 function updateCar(car){
+  // Якщо машину позначено, видаляємо (повертаємо false — дозволимо сплайсити)
+  if(car.removed){
+    if(car.colorInterval) { clearInterval(car.colorInterval); car.colorInterval = null; }
+    try { if(car.element) car.element.remove(); } catch(e){}
+    return false;
+  }
+
   if(car.fast) car.x += car.speed*car.direction*speedMultiplier;
   else { adjustSpeed(car); car.x += (car.currentSpeed||car.speed)*car.direction*speedMultiplier; }
 
@@ -229,18 +271,18 @@ function updateCar(car){
   if(offscreen){
     if(car.fast){
       if(car.colorInterval) clearInterval(car.colorInterval);
-      car.element.remove();
+      if(car.element) car.element.remove();
       return false;
     } else {
       car.x = car.direction>0?-car.element.innerText.length:maxCells;
 
-      // ✅ Рахуємо кожен проїзд
+      // Рахуємо кожен проїзд
       carsPassed++;
+      updateHud();
 
       // Кожні 5 авто → +5 км/год
-      if(carsPassed % 5 === 0){ 
-        kmh += 5; 
-        updateHud(); 
+      if(carsPassed % 5 === 0){
+        kmh += 5;
       }
 
       // Кожні 10 авто → передача + ускладнення
@@ -248,11 +290,11 @@ function updateCar(car){
         speedMultiplier = Math.min(speedMultiplier+0.5,5);
         gear++;
         kmh += 5;
-        updateHud(true); // highlight
+        updateHud(true);
       }
     }
   }
-  car.element.style.left = (car.x*10)+'px';
+  if(car.element) car.element.style.left = (car.x*10)+'px';
   checkCollision(car);
   return true;
 }
@@ -261,8 +303,15 @@ function updateCar(car){
 function mainLoop(){
   if(gameOver) return;
   updateScore();
-  cars.forEach(updateCar);
-  for(let i=fastCars.length-1;i>=0;i--) if(!updateCar(fastCars[i])) fastCars.splice(i,1);
+
+  // Ітеруємо задом наперед, щоб коректно видаляти машини, які повернули false
+  for(let i=cars.length-1;i>=0;i--){
+    if(!updateCar(cars[i])) cars.splice(i,1);
+  }
+  for(let i=fastCars.length-1;i>=0;i--){
+    if(!updateCar(fastCars[i])) fastCars.splice(i,1);
+  }
+
   requestAnimationFrame(mainLoop);
 }
 
