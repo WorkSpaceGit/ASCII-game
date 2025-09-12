@@ -2,47 +2,95 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<title>ASCII-гра</title>
+<title>ASCII Road Game</title>
 <style>
 body {
-  margin:0; height:100vh; background:black;
-  font-family:monospace; white-space:pre; overflow:hidden;
+  margin:0;
+  height:100vh;
+  background:#000;
+  font-family:monospace;
+  white-space:pre;
+  overflow:hidden;
 }
-.car { position:absolute; font-weight:bold; }
-.lane, .divider { position:absolute; width:100%; }
-.lane { border-top:1px solid gray; opacity:0.3; }
-.divider { border-top:4px double yellow; opacity:0.8; }
+.car {
+  position:absolute;
+  font-weight:bold;
+  will-change:transform;
+}
+.lane, .divider {
+  position:absolute;
+  width:100%;
+  pointer-events:none;
+}
+.lane {
+  border-top:1px solid gray;
+  opacity:.3;
+}
+.divider {
+  border-top:4px double yellow;
+  opacity:.8;
+}
 #player {
-  position:absolute; font-weight:bold; font-size:24px;
-  left:50%; transform:translateX(-50%);
+  position:absolute;
+  font-weight:bold;
+  font-size:24px;
+  left:50%;
+  transform:translateX(-50%);
 }
 #score {
-  position:absolute; top:230px; left:50%;
-  transform:translateX(-50%); color:white; font-size:20px;
+  position:absolute;
+  top:230px;
+  left:50%;
+  transform:translateX(-50%);
+  color:#fff;
+  font-size:20px;
 }
 #hud {
-  position:absolute; top:260px; left:50%;
-  transform:translateX(-50%); color:lime; font-size:18px;
-  transition: color 0.3s;
+  position:absolute;
+  top:260px;
+  left:50%;
+  transform:translateX(-50%);
+  color:lime;
+  font-size:18px;
+}
+#hud span {
+  transition:color .3s;
+  margin-right:8px;
 }
 #gameover {
-  position:absolute; top:50%; left:50%;
-  transform:translate(-50%,-50%); color:red; font-size:28px;
-  display:none; flex-direction:column; align-items:center; text-align:center;
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  color:red;
+  font-size:28px;
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
 }
-#gameover #gameover-text { margin-bottom:20px; white-space:pre-line; }
+#gameover #gameover-text {
+  margin-bottom:20px;
+  white-space:pre-line;
+}
 button {
-  font-size:20px; padding:10px 20px; margin:5px;
-  background:#222; color:white; border:1px solid gray; border-radius:8px;
+  font-size:20px;
+  padding:10px 20px;
+  margin:5px;
+  background:#222;
+  color:#fff;
+  border:1px solid gray;
+  border-radius:8px;
 }
 #controls {
-  position:absolute; bottom:50px; left:50%;
+  position:absolute;
+  bottom:50px;
+  left:50%;
   transform:translateX(-50%);
 }
 </style>
 </head>
 <body>
-
 <div id="gameover">
   <div id="gameover-text"></div>
   <button onclick="restartGame()">Почати спочатку</button>
@@ -54,368 +102,308 @@ button {
 </div>
 
 <div id="score">00:00:0</div>
-<div id="hud"></div>
+<div id="hud">
+  <span id="hud-speed"></span>
+  <span id="hud-gear"></span>
+  <span id="hud-cars"></span>
+  <span id="hud-shields"></span>
+</div>
 <div id="player">:=[:]=:</div>
 
 <script>
-const carSprites = ['=(o)≡','≡[+]≡','(o)=(o)=[:]','=[:]=','<[•)>','=[-]=','[]=o=[]','<(o)>'];
-const carColors  = ['red','orange','yellow','lime','cyan','blue','magenta','white'];
-const laneCount = 3;
-const laneHeight = 30;
-const safeDistance = 7;
-let laneTops = [];
-let maxCells = Math.floor(window.innerWidth / 10);
-let speedMultiplier = 1;
-let gameOver = false;
-let fastCarsSpawned = 0;
-let startTime;
-let cars = [], fastCars = [], trucks = [], motorcyclists = [];
+const carSprites=['=(o)≡','≡[+]≡','(o)=(o)=[:]','=[:]=','<[•)>','=[-]=','[]=o=[]','<(o)>'];
+const carColors=['red','orange','yellow','lime','cyan','blue','magenta','white'];
+const laneCount=3, laneHeight=30, safeDistance=7;
+let laneTops=[], maxCells=Math.floor(innerWidth/10);
+let cars=[], fastCars=[], trucks=[], motorcyclists=[];
+let carsPassed=0, kmh=20, gear=1, shields=0, lastSide=null, speedMultiplier=1;
+let startTime, gameOver=false, playerLane=laneCount;
+let fastCarTimer=null, truckTimer=null, motoTimer=null;
 
-let carsPassed = 0;
-let kmh = 20;
-let gear = 1;
-let shields = 0;
-let lastSide = null;
-const gearNames = ["ПЕРША","ДРУГА","ТРЕТЯ","ЧЕТВЕРТА","П’ЯТА"];
+const player=document.getElementById('player');
+const gearNames=["ПЕРША","ДРУГА","ТРЕТЯ","ЧЕТВЕРТА","П’ЯТА"];
 
-// інтервали для ворогів
-let truckInterval=null, motoInterval=null;
-
-const player = document.getElementById('player');
-let playerLane = laneCount;
-
-// HUD
-function updateHud(highlight=false){
-  const hud = document.getElementById('hud');
-  hud.innerText = `Швидкість: ${kmh} км/год || Передача: ${gearNames[gear-1]} || Уникнутих авто: ${carsPassed} || Щити: ${shields}`;
-  hud.style.color = highlight ? "yellow" : "lime";
-  if(highlight){
-    setTimeout(()=>{ if(!gameOver) hud.style.color="lime"; },1000);
-  }
+function updateHud(changed=""){
+  const s=document.getElementById("hud-speed"),
+        g=document.getElementById("hud-gear"),
+        c=document.getElementById("hud-cars"),
+        h=document.getElementById("hud-shields");
+  s.innerText=`Швидкість: ${kmh} км/год`;
+  g.innerText=`Передача: ${gearNames[gear-1]}`;
+  c.innerText=`Уникнутих авто: ${carsPassed}`;
+  h.innerText=`Щити: ${shields}`;
+  [s,g,c,h].forEach(el=>{
+    el.style.color=el.id===changed?"yellow":"lime";
+    if(el.id===changed)setTimeout(()=>{if(!gameOver)el.style.color="lime"},1000);
+  });
 }
 
-// Ініціалізація доріжок
-function initLanes() {
-  laneTops = Array.from({length: laneCount*2}, (_,i)=>i*laneHeight + (i>=laneCount?laneHeight/2:0));
-  laneTops.forEach(t=>addElement('lane', t));
-  [laneCount*laneHeight, laneCount*laneHeight + laneHeight/2].forEach(t=>addElement('divider', t));
-  addElement('lane', laneTops.at(-1)+laneHeight);
+function initLanes(){
+  laneTops=Array.from({length:laneCount*2},(_,i)=>i*laneHeight+(i>=laneCount?laneHeight/2:0));
+  laneTops.forEach(t=>addEl('lane',t));
+  [laneCount*laneHeight,laneCount*laneHeight+laneHeight/2].forEach(t=>addEl('divider',t));
+  addEl('lane',laneTops.at(-1)+laneHeight);
 }
-function addElement(cls, top){
-  const el = document.createElement('div');
-  el.className = cls;
-  el.style.top = top+'px';
-  document.body.appendChild(el);
-  return el;
+function addEl(cls,top){
+  const el=document.createElement('div');
+  el.className=cls; el.style.top=top+'px';
+  document.body.appendChild(el); return el;
 }
 
-// Рух гравця
-function updatePlayerPos(){ player.style.top = (laneTops[playerLane]+5)+'px'; }
-updatePlayerPos();
+function updatePlayerPos(){player.style.top=(laneTops[playerLane]+5)+'px'}
 function movePlayer(dir){
-  const prevLane = playerLane;
-  playerLane = Math.max(0, Math.min(laneTops.length-1, playerLane+dir));
+  playerLane=Math.max(0,Math.min(laneTops.length-1,playerLane+dir));
   updatePlayerPos();
-
-  if(playerLane === 0) lastSide = 0;
-  if(playerLane === laneTops.length-1 && lastSide === 0){
-    shields++;
-    lastSide = null;
-    updateHud(true);
+  if(playerLane===0)lastSide=0;
+  if(playerLane===laneTops.length-1&&lastSide===0){
+    shields++; lastSide=null; updateHud("hud-shields");
   }
-  if(playerLane === laneTops.length-1) lastSide = 1;
-  if(playerLane === 0 && lastSide === 1){
-    shields++;
-    lastSide = null;
-    updateHud(true);
+  if(playerLane===laneTops.length-1)lastSide=1;
+  if(playerLane===0&&lastSide===1){
+    shields++; lastSide=null; updateHud("hud-shields");
   }
 }
-document.addEventListener('keydown', e=>{
-  if(e.key==='ArrowUp') movePlayer(-1);
-  if(e.key==='ArrowDown') movePlayer(1);
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowUp')movePlayer(-1);
+  if(e.key==='ArrowDown')movePlayer(1);
 });
+updatePlayerPos();
 
-// Маячки гравця
-function animatePlayerLights(){
-  player.innerHTML = player.innerText.split('').map(ch=>{
-    if(ch===':') return `<span style="color:${Math.random()>0.5?'red':'blue'}">:</span>`;
-    if(ch==='=') return `<span style="color:${Math.random()>0.5?'blue':'white'}">=</span>`;
+setInterval(()=>{
+  player.innerHTML=player.innerText.split('').map(ch=>{
+    if(ch===':')return`<span style="color:${Math.random()>.5?'red':'blue'}">:</span>`;
+    if(ch==='=')return`<span style="color:${Math.random()>.5?'blue':'white'}">=</span>`;
     return ch;
   }).join('');
-}
+},300);
 
-// Ініціалізація авто
-function initCars(){
-  carSprites.forEach((sprite,i)=>{
-    const lane = i % (laneCount*2);
-    const el = document.createElement('div');
-    el.className='car';
-    el.innerText = sprite;
-    el.style.color = carColors[i % carColors.length];
-    el.style.top = laneTops[lane] + (lane===laneCount?12:5)+'px';
-    document.body.appendChild(el);
-    cars.push({
-      element: el,
-      x: Math.random()*maxCells,
-      speed: (0.5 + Math.random()*2)/16,
-      direction: lane < laneCount ? -1 : 1,
-      lane, fast:false, removed:false
+function initCars(mult=1){
+  for(let m=0;m<mult;m++){
+    carSprites.forEach((sprite,i)=>{
+      const lane=i%(laneCount*2), el=document.createElement('div');
+      el.className='car'; el.textContent=sprite;
+      el.style.color=carColors[i%carColors.length];
+      el.style.top=laneTops[lane]+(lane===laneCount?12:5)+'px';
+      document.body.appendChild(el);
+      cars.push({
+        element:el,
+        x:Math.random()*maxCells,
+        spriteLen:sprite.length,
+        speed:(0.5+Math.random()*2)/16,
+        direction:lane<laneCount?-1:1,
+        lane,
+        currentSpeed:0,
+        removed:false
+      });
     });
-  });
+  }
+}
+function adjustSpeeds(){
+  const byLane={};
+  cars.forEach(c=>(byLane[c.lane]??=[]).push(c));
+  for(const lane in byLane){
+    const arr=byLane[lane].sort((a,b)=>a.x-b.x);
+    arr.forEach((car,idx)=>{
+      const n=car.direction>0?arr[idx+1]:arr[idx-1];
+      let slowed=false;
+      if(n){
+        const dist=Math.abs(n.x-car.x);
+        if((car.direction>0&&n.x>car.x&&dist<safeDistance)||
+           (car.direction<0&&car.x>n.x&&dist<safeDistance))slowed=true;
+      }
+      car.currentSpeed=slowed?car.speed*0.3:car.speed;
+    });
+  }
 }
 
-// Спавн швидких авто
 function spawnFastCar(){
-  if(gameOver) return;
-  const lane = Math.floor(Math.random()*laneTops.length);
-  const el = document.createElement('div');
-  el.className='car';
-  el.innerText='(o)=(o)';
+  if(gameOver)return;
+  const lane=Math.floor(Math.random()*laneTops.length);
+  const el=document.createElement('div');
+  el.className='car'; el.textContent='(o)=(o)';
   el.style.top=laneTops[lane]+5+'px';
   document.body.appendChild(el);
-  const fastCar = {
-    element: el,
-    x: lane<laneCount?maxCells+5:-5,
-    speed: ((0.5 + Math.random()*2)/16)*15,
-    direction: lane<laneCount?-1:1,
-    lane, fast:true, colorInterval:null, removed:false
+  const car={
+    element:el,
+    x:lane<laneCount?maxCells+5:-5,
+    spriteLen:5,
+    speed:0.8, // фіксована швидкість
+    direction:lane<laneCount?-1:1,
+    lane,
+    removed:false,
+    fast:true
   };
-  fastCar.colorInterval = setInterval(()=>{
-    if(gameOver){ clearInterval(fastCar.colorInterval); return; }
-    el.style.color = ['red','yellow','lime','cyan','magenta','white'][Math.floor(Math.random()*6)];
+  el.colorTimer=setInterval(()=>{
+    el.style.color=['red','yellow','lime','cyan','magenta','white'][Math.floor(Math.random()*6)]
   },200);
-  fastCars.push(fastCar);
+  fastCars.push(car);
 }
 
-// Спавн вантажівок
 function spawnTruck(){
-  if(gameOver) return;
-  const lane = Math.floor(Math.random()*laneTops.length);
-  const el = document.createElement('div');
-  el.className='car';
-  el.innerText='[=====TRUCK=====]';
-  el.style.color='gray';
+  if(gameOver)return;
+  const lane=Math.floor(Math.random()*laneTops.length);
+  const el=document.createElement('div');
+  el.className='car'; el.textContent='[=====TRUCK=====]';
   el.style.top=laneTops[lane]+5+'px';
   document.body.appendChild(el);
-  trucks.push({
-    element: el,
-    x: lane<laneCount?maxCells+5:-20,
-    speed: ((0.5 + Math.random()*2)/16)*2,
-    direction: lane<laneCount?-1:1,
-    lane, removed:false
-  });
+  const t={
+    element:el,
+    x:lane<laneCount?maxCells+10:-20,
+    spriteLen:16,
+    speed:(0.5+Math.random()*2)/16,
+    direction:lane<laneCount?-1:1,
+    lane,
+    removed:false
+  };
+  el.colorTimer=setInterval(()=>{
+    el.style.color=['yellow','white','orange'][Math.floor(Math.random()*3)]
+  },400);
+  trucks.push(t);
 }
 
-// Спавн мотоциклістів
 function spawnMotorcyclists(){
-  if(gameOver) return;
-  const lane = Math.floor(Math.random()*(laneTops.length-1));
-  const el1 = document.createElement('div');
-  const el2 = document.createElement('div');
-  el1.className='car'; el2.className='car';
-  el1.innerText='(o)≡(o)';
-  el2.innerText='(o)≡(o)';
-  el1.style.color='white';
-  el2.style.color='white';
+  if(gameOver)return;
+  if(carsPassed<70) return; // тільки після 70 авто
+  const lane=Math.floor(Math.random()*(laneTops.length-1));
+  const el1=document.createElement('div'), el2=document.createElement('div');
+  el1.className=el2.className='car';
+  el1.textContent=el2.textContent='(o)≡(o)';
+  el1.style.color=el2.style.color='white';
   el1.style.top=laneTops[lane]+5+'px';
   el2.style.top=laneTops[lane+1]+5+'px';
-  document.body.appendChild(el1);
-  document.body.appendChild(el2);
+  document.body.appendChild(el1); document.body.appendChild(el2);
   motorcyclists.push({
     elements:[el1,el2],
-    x: lane<laneCount?maxCells+5:-10,
-    speed: ((0.5 + Math.random()*2)/16)*4,
-    direction: lane<laneCount?-1:1,
+    x:lane<laneCount?maxCells+5:-10,
+    speed:((0.5+Math.random()*2)/16)*4,
+    direction:lane<laneCount?-1:1,
     lanes:[lane,lane+1],
     removed:false
   });
 }
-// Колізії
-function checkCollision(car){
-  if(car.removed) return;
 
-  const carLeft = car.x*10,
-        carRight = carLeft + (car.element && car.element.innerText ? car.element.innerText.length*10 : 0),
-        playerLeft = parseFloat(player.offsetLeft),
-        playerRight = playerLeft + player.offsetWidth;
-  if(car.lane===playerLane && !(carRight<playerLeft || carLeft>playerRight)){
-    if(shields > 0){
-      shields--;
-      updateHud(true);
-      if(car.element) car.element.remove();
-      car.removed = true;
-      return;
-    } else {
-      endGame();
-    }
+function checkCollision(car){
+  if(car.removed)return;
+  const carLeft=car.x*10, carRight=carLeft+car.spriteLen*10;
+  const pl=parseFloat(player.offsetLeft), pr=pl+player.offsetWidth;
+  if(car.lane===playerLane&&!(carRight<pl||carLeft>pr)){
+    if(shields>0){
+      shields--; updateHud("hud-shields");
+      car.removed=true; car.element.remove();
+    }else endGame();
   }
 }
-
-// Колізії для мотоциклістів
 function checkMotorcyclists(mc){
-  if(mc.removed) return;
-  const playerLeft = parseFloat(player.offsetLeft);
-  const playerRight = playerLeft + player.offsetWidth;
+  if(mc.removed)return;
+  const pl=parseFloat(player.offsetLeft), pr=pl+player.offsetWidth;
   mc.lanes.forEach((lane,i)=>{
     if(lane===playerLane){
-      const el = mc.elements[i];
-      const carLeft = mc.x*10;
-      const carRight = carLeft + el.innerText.length*10;
-      if(!(carRight<playerLeft || carLeft>playerRight)){
+      const el=mc.elements[i], cl=mc.x*10, cr=cl+el.textContent.length*10;
+      if(!(cr<pl||cl>pr)){
         if(shields>0){
-          shields--;
-          updateHud(true);
-          mc.elements.forEach(e=>e.remove());
-          mc.removed=true;
-        } else {
-          endGame();
-        }
+          shields--; updateHud("hud-shields");
+          mc.elements.forEach(e=>e.remove()); mc.removed=true;
+        }else endGame();
       }
     }
   });
 }
 
-// Швидкість авто
-function adjustSpeed(car){
-  const slowed = cars.some(other=>other!==car && other.lane===car.lane &&
-    ((car.direction>0 && other.x>car.x && other.x-car.x<safeDistance) ||
-     (car.direction<0 && car.x>other.x && car.x-other.x<safeDistance))
-  );
-  car.currentSpeed = slowed ? car.speed*0.3 : car.speed;
+function updateCar(c){
+  if(c.removed)return false;
+  if(c.fast) c.x+=c.speed*c.direction*speedMultiplier;
+  else {
+    adjustSpeeds();
+    c.x+=(c.currentSpeed||c.speed)*c.direction*speedMultiplier;
+  }
+  if(c.direction>0?c.x>maxCells:c.x<-c.spriteLen){
+    if(c.fast){
+      c.element.remove(); return false;
+    }else{
+      c.x=c.direction>0?-c.spriteLen:maxCells;
+      carsPassed++; updateHud("hud-cars");
+      if(carsPassed%5===0){kmh+=5; updateHud("hud-speed");}
+      if(carsPassed%10===0&&gear<5){
+        speedMultiplier=Math.min(speedMultiplier+0.5,5);
+        gear++; kmh+=5; updateHud("hud-gear");
+      }
+      if(carsPassed===100){initCars(1);}
+    }
+  }
+  c.element.style.transform=`translateX(${c.x*10}px)`;
+  checkCollision(c);
+  return true;
+}
+function updateTruck(t){
+  if(t.removed)return false;
+  t.x+=t.speed*t.direction*speedMultiplier;
+  if(t.direction>0?t.x>maxCells:t.x<-20){
+    t.element.remove(); return false;
+  }
+  t.element.style.transform=`translateX(${t.x*10}px)`;
+  checkCollision(t); return true;
+}
+function updateMotorcyclist(mc){
+  if(mc.removed)return false;
+  mc.x+=mc.speed*mc.direction*speedMultiplier;
+  if(mc.direction>0?mc.x>maxCells:mc.x<-10){
+    mc.elements.forEach(e=>e.remove()); return false;
+  }
+  mc.elements.forEach(e=>e.style.transform=`translateX(${mc.x*10}px)`);
+  checkMotorcyclists(mc); return true;
 }
 
-// Кінець гри
+let active=true;
+document.addEventListener("visibilitychange",()=>{active=!document.hidden});
+function animate(){
+  if(gameOver)return;
+  updateScore();
+  cars=cars.filter(updateCar);
+  fastCars=fastCars.filter(updateCar);
+  trucks=trucks.filter(updateTruck);
+  motorcyclists=motorcyclists.filter(updateMotorcyclist);
+  if(active)requestAnimationFrame(animate);
+  else setTimeout(animate,1000/15);
+}
+function updateScore(){
+  const e=Date.now()-startTime;
+  const m=Math.floor(e/60000).toString().padStart(2,'0');
+  const s=Math.floor((e%60000)/1000).toString().padStart(2,'0');
+  const t=Math.floor((e%1000)/100);
+  document.getElementById('score').innerText=`${m}:${s}:${t}`;
+}
+
 function endGame(){
   gameOver=true;
-  clearInterval(playerLightsInterval);
-  if(truckInterval) clearInterval(truckInterval);
-  if(motoInterval) clearInterval(motoInterval);
-  fastCars.forEach(c=>{ if(c.colorInterval) clearInterval(c.colorInterval); });
+  clearInterval(fastCarTimer);
+  clearInterval(truckTimer);
+  clearInterval(motoTimer);
   document.getElementById('gameover-text').innerText=
     `Гру закінчено.\nзагальний час - ${document.getElementById('score').innerText}\nуникнутих зіткнень: ${carsPassed}`;
   document.getElementById('gameover').style.display='flex';
 }
-
-// Рестарт
 function restartGame(){
-  [...cars, ...fastCars, ...trucks, ...motorcyclists].forEach(c=>{
-    try { if(c.colorInterval) clearInterval(c.colorInterval); } catch(e){}
-    try { if(c.element) c.element.remove(); } catch(e){}
-    try { if(c.elements) c.elements.forEach(e=>e.remove()); } catch(e){}
+  [...cars,...fastCars,...trucks,...motorcyclists].forEach(c=>{
+    try{c.element.remove()}catch{};
+    if(c.elements)c.elements.forEach(e=>e.remove());
   });
   cars=[]; fastCars=[]; trucks=[]; motorcyclists=[];
-  fastCarsSpawned=0; carsPassed=0; kmh=20; gear=1; speedMultiplier=1; shields=0; lastSide=null;
-  gameOver=false;
-  if(truckInterval) clearInterval(truckInterval);
-  if(motoInterval) clearInterval(motoInterval);
+  carsPassed=0; kmh=20; gear=1; speedMultiplier=1; shields=0; lastSide=null; gameOver=false;
   document.getElementById('gameover').style.display='none';
-  startTime=Date.now();
+  startGame();
+}
+function startGame(){
   initCars();
-  requestAnimationFrame(mainLoop);
-  playerLightsInterval = setInterval(animatePlayerLights,300);
+  startTime=Date.now();
+  animate();
   updateHud();
-  startIntervals();
+  fastCarTimer = setInterval(spawnFastCar, 10000); // раз на 10 секунд
+  truckTimer   = setInterval(()=>{if(carsPassed>=40)spawnTruck()}, 5000+Math.random()*2000);
+  motoTimer    = setInterval(spawnMotorcyclists, 5000); // раз на 5 секунд (після 70 авто)
 }
-
-// Таймер
-function updateScore(){
-  const elapsed = Date.now()-startTime;
-  const min = Math.floor(elapsed/60000).toString().padStart(2,'0');
-  const sec = Math.floor((elapsed%60000)/1000).toString().padStart(2,'0');
-  const tenths = Math.floor((elapsed%1000)/100);
-  document.getElementById('score').innerText=`${min}:${sec}:${tenths}`;
-}
-
-// Основна анімація авто
-function updateCar(car){
-  if(car.removed){
-    try { if(car.element) car.element.remove(); } catch(e){}
-    return false;
-  }
-
-  if(car.fast) car.x += car.speed*car.direction*speedMultiplier;
-  else { adjustSpeed(car); car.x += (car.currentSpeed||car.speed)*car.direction*speedMultiplier; }
-
-  const offscreen = car.direction>0? car.x>maxCells : car.x<-car.element.innerText.length;
-  if(offscreen){
-    if(car.fast){
-      if(car.element) car.element.remove();
-      return false;
-    } else {
-      car.x = car.direction>0?-car.element.innerText.length:maxCells;
-      carsPassed++;
-      updateHud();
-
-      if(carsPassed % 5 === 0){ kmh += 5; }
-      if(carsPassed % 10 === 0 && gear < 5){
-        speedMultiplier = Math.min(speedMultiplier+0.5,5);
-        gear++; kmh += 5; updateHud(true);
-      }
-    }
-  }
-  if(car.element) car.element.style.left = (car.x*10)+'px';
-  checkCollision(car);
-  return true;
-}
-
-// Оновлення вантажівок
-function updateTruck(truck){
-  if(truck.removed){ try { truck.element.remove(); } catch(e){}; return false; }
-  truck.x += truck.speed*truck.direction*speedMultiplier;
-  const offscreen = truck.direction>0? truck.x>maxCells : truck.x<-20;
-  if(offscreen){ truck.element.remove(); return false; }
-  truck.element.style.left=(truck.x*10)+'px';
-  checkCollision(truck);
-  return true;
-}
-
-// Оновлення мотоциклістів
-function updateMotorcyclists(mc){
-  if(mc.removed){ return false; }
-  mc.x += mc.speed*mc.direction*speedMultiplier;
-  const offscreen = mc.direction>0? mc.x>maxCells : mc.x<-10;
-  if(offscreen){ mc.elements.forEach(e=>e.remove()); return false; }
-  mc.elements.forEach(e=>{ e.style.left=(mc.x*10)+'px'; });
-  checkMotorcyclists(mc);
-  return true;
-}
-
-// Головний цикл
-function mainLoop(){
-  if(gameOver) return;
-  updateScore();
-
-  for(let i=cars.length-1;i>=0;i--){ if(!updateCar(cars[i])) cars.splice(i,1); }
-  for(let i=fastCars.length-1;i>=0;i--){ if(!updateCar(fastCars[i])) fastCars.splice(i,1); }
-  for(let i=trucks.length-1;i>=0;i--){ if(!updateTruck(trucks[i])) trucks.splice(i,1); }
-  for(let i=motorcyclists.length-1;i>=0;i--){ if(!updateMotorcyclists(motorcyclists[i])) motorcyclists.splice(i,1); }
-
-  requestAnimationFrame(mainLoop);
-}
-
-// Запуск інтервалів
-function startIntervals(){
-  setInterval(spawnFastCar, 3000 + Math.random()*4000);
-  truckInterval = setInterval(()=>{ if(carsPassed>=70) spawnTruck(); }, 12000);
-  motoInterval = setInterval(()=>{ 
-    if(carsPassed>=100){ 
-      const delay = Math.max(5000 - kmh*20, 1000);
-      if(Math.random()<0.5) spawnMotorcyclists();
-    }
-  }, 4000);
-}
-
-// Запуск гри
 initLanes();
-initCars();
-startTime = Date.now();
-let playerLightsInterval = setInterval(animatePlayerLights,300);
-requestAnimationFrame(mainLoop);
-updateHud();
-startIntervals();
-
-// Адаптивність при resize
-window.addEventListener('resize',()=>{ maxCells=Math.floor(window.innerWidth/10); });
+startGame();
+window.addEventListener('resize',()=>{maxCells=Math.floor(innerWidth/10)});
 </script>
 </body>
 </html>
