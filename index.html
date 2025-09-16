@@ -52,10 +52,11 @@ body {
   transform:translateX(-50%);
   color:lime;
   font-size:18px;
+  white-space:nowrap; /* все в один рядок */
 }
 #hud span {
   transition:color .3s;
-  margin-right:8px;
+  margin-right:12px;
 }
 #gameover {
   position:absolute;
@@ -103,7 +104,6 @@ button {
 
 <div id="score">00:00:0</div>
 <div id="hud">
-  <span id="hud-speed"></span>
   <span id="hud-gear"></span>
   <span id="hud-cars"></span>
   <span id="hud-shields"></span>
@@ -121,18 +121,16 @@ let startTime, gameOver=false, playerLane=laneCount;
 let fastCarTimer=null, truckTimer=null, motoTimer=null;
 
 const player=document.getElementById('player');
-const gearNames=["ПЕРША","ДРУГА","ТРЕТЯ","ЧЕТВЕРТА","П’ЯТА"];
+const gearNames=["ПЕРША передача","ДРУГА передача","ТРЕТЯ передача","ЧЕТВЕРТА передача","П’ЯТА передача"];
 
 function updateHud(changed=""){
-  const s=document.getElementById("hud-speed"),
-        g=document.getElementById("hud-gear"),
+  const g=document.getElementById("hud-gear"),
         c=document.getElementById("hud-cars"),
         h=document.getElementById("hud-shields");
-  s.innerText=`Швидкість: ${kmh} км/год`;
-  g.innerText=`Передача: ${gearNames[gear-1]}`;
-  c.innerText=`Уникнутих авто: ${carsPassed}`;
+  g.innerText=`${gearNames[gear-1]} (${kmh}км/год)`;
+  c.innerText=`Уникнутих зіткнень: ${carsPassed}`;
   h.innerText=`Щити: ${shields}`;
-  [s,g,c,h].forEach(el=>{
+  [g,c,h].forEach(el=>{
     el.style.color=el.id===changed?"yellow":"lime";
     if(el.id===changed)setTimeout(()=>{if(!gameOver)el.style.color="lime"},1000);
   });
@@ -169,13 +167,11 @@ document.addEventListener('keydown',e=>{
 });
 updatePlayerPos();
 
-setInterval(()=>{
-  player.innerHTML=player.innerText.split('').map(ch=>{
-    if(ch===':')return`<span style="color:${Math.random()>.5?'red':'blue'}">:</span>`;
-    if(ch==='=')return`<span style="color:${Math.random()>.5?'blue':'white'}">=</span>`;
-    return ch;
-  }).join('');
-},300);
+setInterval(()=>{player.innerHTML=player.innerText.split('').map(ch=>{
+  if(ch===':')return`<span style="color:${Math.random()>.5?'red':'blue'}">:</span>`;
+  if(ch==='=')return`<span style="color:${Math.random()>.5?'blue':'white'}">=</span>`;
+  return ch;
+}).join('');},300);
 
 function initCars(mult=1){
   for(let m=0;m<mult;m++){
@@ -233,14 +229,12 @@ function spawnFastCar(){
     removed:false,
     fast:true
   };
-  el.colorTimer=setInterval(()=>{
-    el.style.color=['red','yellow','lime','cyan','magenta','white'][Math.floor(Math.random()*6)]
-  },200);
+  el.colorTimer=setInterval(()=>{el.style.color=['red','yellow','lime','cyan','magenta','white'][Math.floor(Math.random()*6)]},200);
   fastCars.push(car);
 }
 
 function spawnTruck(){
-  if(gameOver)return;
+  if(gameOver||carsPassed<20)return;
   const lane=Math.floor(Math.random()*laneTops.length);
   const el=document.createElement('div');
   el.className='car'; el.textContent='[=====TRUCK=====]';
@@ -250,20 +244,17 @@ function spawnTruck(){
     element:el,
     x:lane<laneCount?maxCells+10:-20,
     spriteLen:16,
-    speed:(0.5+Math.random()*2)/16,
+    speed:0.5/16,
     direction:lane<laneCount?-1:1,
     lane,
     removed:false
   };
-  el.colorTimer=setInterval(()=>{
-    el.style.color=['yellow','white','orange'][Math.floor(Math.random()*3)]
-  },400);
+  el.colorTimer=setInterval(()=>{el.style.color=['yellow','white','orange'][Math.floor(Math.random()*3)]},400);
   trucks.push(t);
 }
 
 function spawnMotorcyclists(){
-  if(gameOver)return;
-  if(carsPassed<70) return; // тільки після 70 авто
+  if(gameOver||carsPassed<30)return;
   const lane=Math.floor(Math.random()*(laneTops.length-1));
   const el1=document.createElement('div'), el2=document.createElement('div');
   el1.className=el2.className='car';
@@ -275,7 +266,7 @@ function spawnMotorcyclists(){
   motorcyclists.push({
     elements:[el1,el2],
     x:lane<laneCount?maxCells+5:-10,
-    speed:((0.5+Math.random()*2)/16)*4,
+    speed:0.8/2, // удвічі повільніше fastCars
     direction:lane<laneCount?-1:1,
     lanes:[lane,lane+1],
     removed:false
@@ -311,7 +302,7 @@ function checkMotorcyclists(mc){
 
 function updateCar(c){
   if(c.removed)return false;
-  if(c.fast) c.x+=c.speed*c.direction*speedMultiplier;
+  if(c.fast) c.x+=c.speed*c.direction;
   else {
     adjustSpeeds();
     c.x+=(c.currentSpeed||c.speed)*c.direction*speedMultiplier;
@@ -322,12 +313,15 @@ function updateCar(c){
     }else{
       c.x=c.direction>0?-c.spriteLen:maxCells;
       carsPassed++; updateHud("hud-cars");
-      if(carsPassed%5===0){kmh+=5; updateHud("hud-speed");}
-      if(carsPassed%10===0&&gear<5){
-        speedMultiplier=Math.min(speedMultiplier+0.5,5);
-        gear++; kmh+=5; updateHud("hud-gear");
+      if(carsPassed===10){gear=2; kmh=40; speedMultiplier=2; updateHud("hud-gear");}
+      if(carsPassed===20){gear=3; kmh=60; speedMultiplier=3; updateHud("hud-gear");}
+      if(carsPassed===30){gear=4; kmh=80; speedMultiplier=4; updateHud("hud-gear");}
+      if(carsPassed===40){
+        gear=5; kmh=100; speedMultiplier=5; updateHud("hud-gear");
+        // після П’ЯТОЇ передачі fastCars удвічі частіше
+        clearInterval(fastCarTimer);
+        fastCarTimer=setInterval(spawnFastCar,5000);
       }
-      if(carsPassed===100){initCars(1);}
     }
   }
   c.element.style.transform=`translateX(${c.x*10}px)`;
@@ -336,7 +330,7 @@ function updateCar(c){
 }
 function updateTruck(t){
   if(t.removed)return false;
-  t.x+=t.speed*t.direction*speedMultiplier;
+  t.x+=t.speed*t.direction;
   if(t.direction>0?t.x>maxCells:t.x<-20){
     t.element.remove(); return false;
   }
@@ -345,7 +339,7 @@ function updateTruck(t){
 }
 function updateMotorcyclist(mc){
   if(mc.removed)return false;
-  mc.x+=mc.speed*mc.direction*speedMultiplier;
+  mc.x+=mc.speed*mc.direction;
   if(mc.direction>0?mc.x>maxCells:mc.x<-10){
     mc.elements.forEach(e=>e.remove()); return false;
   }
@@ -397,9 +391,9 @@ function startGame(){
   startTime=Date.now();
   animate();
   updateHud();
-  fastCarTimer = setInterval(spawnFastCar, 10000); // раз на 10 секунд
-  truckTimer   = setInterval(()=>{if(carsPassed>=40)spawnTruck()}, 5000+Math.random()*2000);
-  motoTimer    = setInterval(spawnMotorcyclists, 5000); // раз на 5 секунд (після 70 авто)
+  fastCarTimer = setInterval(spawnFastCar, 10000); 
+  truckTimer   = setInterval(spawnTruck, 7000);
+  motoTimer    = setInterval(spawnMotorcyclists, 5000);
 }
 initLanes();
 startGame();
